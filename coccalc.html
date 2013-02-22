@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>CoCCalc</title>
+<script>var g_info; function set_info(x) { g_info = x; }</script>
+<script src="ext/jquery-1.9.1.min.js"></script>
+<script src="ext/chosen.jquery.min.js"></script>
+<script src="info.js"></script>
+<link href="ext/chosen.css" rel="stylesheet">
+<style>
+body { font-family: sans-serif; }
+tbody th { text-align: right; }
+tbody.main > tr > th { width: 100px; }
+tbody.main > tr > td:nth-child(2) { width: 180px; }
+tbody.main > tr > td:nth-child(3) { width: 60px; }
+tbody.main > tr > td:nth-child(4) { width: 30px; }
+tbody.main > tr > td:nth-child(5) { width: 640px; }
+select { width: 100%; }
+.selected_force { display: inline-block; width: 140px; border: 3px double #ddd; margin: 10px; }
+.selected_force td:first-child { width: 100px; text-align: right; font-size: 0.75em; }
+.selected_force td:nth-child(2) { width: 10px; font-size: 2em; cursor: pointer; }
+.selected_force td:last-child { width: 30px; }
+.selected_force input { width: 27px; }
+.run_button { text-align: center; }
+.obj_name { color: #888; }
+</style>
+
+<form>
+<!-- Yeah <table>, so what. -->
+<table>
+    <thead>
+        <tr>
+            <th>
+            <th>Object
+            <th>Level
+            <th>
+            <th>Currently selected
+    <tbody class="main">
+        <tr id="attackers">
+            <th>Attackers
+            <td><select></select>
+            <td><select><option>1</select>
+            <td><input type="button" value="+">
+            <td>
+        <tr id="targets">
+            <th>Target
+            <td><select></select>
+            <td><select><option>1</select>
+            <td><input type="button" value="+">
+            <td>
+        <tr id="defenses">
+            <th>Defenses
+            <td><select></select>
+            <td><select><option>1</select>
+            <td><input type="button" value="+">
+            <td>
+</table>
+<p class="run_button">
+    <input type="button" value="Run">
+</form>
+
+<table>
+    <caption>Outcome
+    <tr>
+        <th>Result
+        <td id="result">
+    <tr>
+        <th>Time spent
+        <td id="time_spent">0 sec
+    <tr>
+        <th>Surviving attackers
+        <td id="surviving_attackers">
+    <tr>
+        <th>Surviving targets
+        <td id="surviving_targets">
+</table>
+
+<script>
+var g_group_names = {
+    'characters': 'Troops',
+    'heroes': 'Heroes',
+    'buildings': 'Buildings',
+    'traps': 'Traps',
+};
+
+function find(key, tid) {
+    var content = g_info[key];
+    for (var j = 0; j < content.length; ++ j) {
+        if (content[j][0] == tid) {
+            return content[j][1];
+        }
+    }
+    return null;
+}
+
+function name_of(key, tid) {
+    var real_name = g_info.texts[tid];
+    if (key == 'buildings' && find('heroes', tid) !== null) {
+        real_name += " Altar";
+    }
+    return real_name;
+}
+
+function add_selections(key, element) {
+    var content = g_info[key];
+    var optgroup = $('<optgroup>').attr('label', g_group_names[key]);
+    for (var j = 0; j < content.length; ++ j) {
+        var tid = content[j][0];
+        var real_name = name_of(key, tid);
+        var value = content[j][1];
+        optgroup.append($('<option>').val(key + ',' + tid).text(real_name || tid));
+    }
+    element.append(optgroup);
+}
+
+function update_level() {
+    var self = $(this);
+    var val = self.val().split(/,/);
+    var key = val[0];
+    var tid = val[1];
+    var value = find(key, tid);
+    var levels = value.Levels;
+    var levels_select = self.parent().next().children('select');
+    if (levels) {
+        var current_level = Math.min(levels.length, +levels_select.val());
+        levels_select.empty();
+        for (var i = 0; i < levels.length; ++ i) {
+            levels_select.append($('<option>').text(i+1));
+        }
+        levels_select.val(current_level);
+    } else {
+        levels_select.empty();
+        levels_select.append($('<option>').text('1'));
+    }
+    levels_select.trigger('liszt:updated');
+}
+
+function attack_1(attacker, target, multiplier) {
+    var count = 0;
+    for (var i = 0; i < attacker.hps.length; ++ i) {
+        if (attacker.hps[i] > 0) {
+            ++ count;
+        }
+    }
+
+    var damage = attacker.level.Damage * attacker.main.AttackSpeed * count * multiplier / 1000;
+
+    var all_dead = true;
+    for (var i = 0; i < target.hps.length; ++ i) {
+        if (target.hps[i] <= 0) {
+            continue;
+        }
+        target.hps[i] -= damage;
+        all_dead = false;
+        if (!attacker.main.IsSplashDamage) {
+            break;
+        }
+    }
+    if (!all_dead) {
+        if (attacker.main.AttackCount == 1) {
+            for (var i = 0; i < attacker.hps.length; ++ i) {
+                attacker.hps[i] = 0;
+            }
+        }
+    }
+    return all_dead;
+}
+
+function attack(t, attacker, targets) {
+    if (t % attacker.main.AttackSpeed != 0) {
+        return;
+    }
+
+    // reorder targets to put the preferred ones first.
+    var preferred_building_class = attacker.main.PreferedTargetBuilding;
+    targets.sort(function(a, b) {
+        return (b.main.BuildingClass == preferred_building_class) -
+                (a.main.BuildingClass == preferred_building_class);
+    });
+
+    for (var i = 0; i < targets.length; ++ i) {
+        var is_preferred = (targets[i].main.BuildingClass == attacker.main.PreferedTargetBuilding);
+        var multiplier = is_preferred ? (attacker.main.PreferedTargetDamageMod || 1) : 1;
+        if (!attack_1(attacker, targets[i], multiplier)) {
+            return;
+        }
+    }
+}
+
+/*
+function gcd(x, y) {
+    while (y) {
+        var t = y;
+        y = x % y;
+        x = t;
+    }
+    return x;
+}
+*/
+
+function are_all_dead(objects) {
+    for (var i = 0; i < objects.length; ++ i) {
+        if (objects[i].hps.some(function(x) { return x > 0; })) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function perform_simulation(attackers, targets, defenses) {
+    // Find the GCD of the attack speeds to speed up simulation.
+    /*
+    var dt = 5000;
+    for (var i = 0; i < attackers.length; ++ i) {
+        dt = gcd(dt, attackers[i].main.AttackSpeed);
+    }
+    for (var i = 0; i < defenses.length; ++ i) {
+        dt = gcd(dt, defenses[i].main.AttackSpeed);
+    }
+    */
+
+    for (var t = 2; t < 3 * 60 * 1000; t += 2) {
+        for (var i = 0; i < attackers.length; ++ i) {
+            attack(t, attackers[i], targets);
+        }
+        if (are_all_dead(targets)) {
+            return [true, t];
+        }
+        for (var i = 0; i < defenses.length; ++ i) {
+            attack(t, defenses[i], attackers);
+        }
+        if (are_all_dead(attackers)) {
+            return [false, t];
+        }
+    }
+
+    return [false, t];
+}
+
+function format_time(t) {
+    var seconds = t % 60000;
+    var res = (seconds / 1000).toFixed(3).replace(/\.?0+$/, '') + " sec";
+    if (t > 60000)
+        res = Math.floor(t / 60000) + " min " + res;
+    return res;
+}
+
+function summary(obj) {
+    var result = '<span class="obj_name">' + obj.name + '</span>: [';
+
+    var map = {};
+    for (var i = 0; i < obj.hps.length; ++ i) {
+        var hp = obj.hps[i];
+        if (hp in map) {
+            map[hp] += 1;
+        } else {
+            map[hp] = 1;
+        }
+    }
+
+    var list = [];
+    for (var k in map) {
+        if (map.hasOwnProperty(k)) {
+            list.push([+k, map[k]]);
+        }
+    }
+
+    list.sort(function(a, b) { return b[2] - a[2]; });
+
+    for (var i = 0; i < list.length; ++ i) {
+        if (i != 0) {
+            result += ', ';
+        }
+        result += list[i][0].toFixed(1).replace(/\.?0+$/, '') + '×' + list[i][1];
+    }
+
+    result += ']/' + obj.level.Hitpoints;
+    return result;
+}
+
+$(document).ready(function() {
+    $('.main > tr > td:nth-child(2) > select').each(function(i) {
+        var self = $(this);
+        if (i != 0) {
+            add_selections('buildings', self);
+            add_selections('traps', self);
+        }
+        add_selections('characters', self);
+        add_selections('heroes', self);
+        if (i == 0) {
+            add_selections('buildings', self);
+            add_selections('traps', self);
+        }
+        self.change(update_level);
+    }).change();
+
+    $('select').chosen();
+
+    $('.main input[type=button]').click(function() {
+        var row = $(this).parent().parent();
+        var values = row.find('select').map(function(){ return $(this).val(); });
+        var kv = values[0].split(/,/);
+        var key = kv[0];
+        var tid = kv[1];
+        var level = values[1] - 1;
+        var combined_key = key + ',' + tid + ',' + level;
+
+        var existing_input = row.find('[coccalc\\:value="' + combined_key + '"] input');
+        if (existing_input.length) {
+            existing_input.val(+existing_input.val() + 1);
+        } else {
+            var table = $(
+                '<table class="selected_force" coccalc:value="' + combined_key + '"><tr>' +
+                '   <td>' + name_of(key, tid) + ' ★' + values[1] + '</td>' +
+                '   <td>×</td>' +
+                '   <td><input type="text" value="1"></td>' +
+                '</table>'
+            );
+
+            table.find('td:nth-child(2)').click(function() {
+                $(this).closest('.selected_force').remove();
+            });
+            table.find('input').change(function() {
+                var self = $(this);
+                var value = +self.val();
+                if (!Number.isFinite(value)) {
+                    value = 0;
+                }
+                self.val(value);
+            });
+
+            row.children().last().append(table);
+        }
+    });
+
+    $('.run_button input').click(function() {
+        var combined_key_getter = function() {
+            var self = $(this);
+            var combined_key = self.attr('coccalc:value').split(/,/);
+            var name = self.find('td:first-child').text();
+            var main_object = find(combined_key[0], combined_key[1]);
+            var level_object = main_object.Levels[combined_key[2]];
+            var count = +self.find('input').val();
+            var hps = [];
+            for (var i = 0; i < count; ++ i) {
+                hps[i] = level_object.Hitpoints;
+            }
+            return {
+                'name': name,
+                'main': main_object,
+                'level': level_object,
+                'hps': hps,
+            };
+        };
+        var attackers = $('#attackers .selected_force').map(combined_key_getter).toArray();
+        var targets = $('#targets .selected_force').map(combined_key_getter).toArray();
+        var defenses = $('#defenses .selected_force').map(combined_key_getter).toArray();
+
+        var result = perform_simulation(attackers, targets, defenses);
+        var is_victory = result[0];
+        var time_spent = result[1];
+        $('#result').text(is_victory ? 'Attacker victory' : 'Defense succeed');
+        $('#time_spent').text(format_time(time_spent));
+
+        var attackers_summary = $('<ul>');
+        for (var i = 0; i < attackers.length; ++ i) {
+            attackers_summary.append($('<li>').html(summary(attackers[i])));
+        }
+        $('#surviving_attackers').empty().append(attackers_summary);
+
+        var targets_summary = $('<ul>');
+        for (var i = 0; i < targets.length; ++ i) {
+            targets_summary.append($('<li>').html(summary(targets[i])));
+        }
+        $('#surviving_targets').empty().append(targets_summary);
+    });
+});
+</script>
+
+<!--
+
+coccalc.html ---- Simulate CoC attacks.
+Copyright (C) 2013  kennytm
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program.  If not, see <http://www.gnu.org/licenses/>.
+
+-->
+
