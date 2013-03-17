@@ -1,3 +1,6 @@
+coccalc.html
+============
+
 Known issues:
 
 * Healer isn't handled properly. Healer should attack the attackers, not the
@@ -10,4 +13,10 @@ Features by design:
 * We assume splash damage attack everything for simplicity.
 * There is no guaranteed accuracy of the calculated result. Don't rely on this
   as the sole reference.
+
+dump-scf.py
+===========
+
+We only extract images defined by the shapes. No rotations are applied.
+Composite shapes are split. No names are assigned.
 

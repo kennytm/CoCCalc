@@ -1,5 +1,7 @@
-tmp
+tmp*
 *.pyc
 *.pyo
 __pycache__
 info.js
+*.swp
+.DS_Store
