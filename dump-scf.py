@@ -7,6 +7,7 @@ import array
 import PIL.Image
 import io
 import os.path
+import itertools
 
 def read_ascii(f):
     size = f.read(1)[0]
@@ -30,9 +31,11 @@ TextField = collections.namedtuple('TextField', ('id',))
 def parse_rgba4444_bitmap(data):
     # TODO: Not sure about the actual order.
     result = bytearray()
-    for b in data:
-        result.append((b >> 4) * 17)
-        result.append((b & 0xf) * 17)
+    for i in range(0, len(data), 2):
+        result.append((data[i+1] >> 4) * 17)
+        result.append((data[i+1] & 0xf) * 17)
+        result.append((data[i] >> 4) * 17)
+        result.append((data[i] & 0xf) * 17)
     return bytes(result)
 
 
